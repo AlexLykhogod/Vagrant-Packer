@@ -1,0 +1,72 @@
+cluster_cidr = "192.168.10"
+front_node_count = 1
+front_node_prefix = "front"
+db_node_count = 1
+db_node_prefix = "db"
+vagrant_box_image = "packer_image"
+
+
+Vagrant.configure("2") do |config|
+  config.vm.provision "file" , source: "key/id_rsa.pub" , destination: "/home/vagrant/.ssh/"
+  config.vm.define "packer_vm" do |packer_vm|
+    packer_vm.vm.box = "#{vagrant_box_image}"
+    packer_vm.vm.box_check_update = true
+    packer_vm.vm.hostname = "packer-vm"
+    mngm.vm.synced_folder "./ssh_key", "/home/vagrant/ssh_key"
+    packer_vm.vm.provider "virtualbox" do |vb|
+      vb.name   = "packer-vm"
+      vb.cpus   = 2
+      vb.memory = "2048"
+    end
+    packer_vm.vm.network "private_network", ip: "#{cluster_cidr}.10",
+        nic_type: "82540EM"
+    packer_vm.vm.network "forwarded_port", guest: 80, host: 8081
+    packer_vm.vm.provision "shell", inline: <<-SHELL
+       cp ./ssh_key/id_rsa /home/vagrant/.ssh/id_rsa
+       chmod 664 /home/vagrant/.ssh/id_rsa
+       sudo systemctl restart ssh.service
+    SHELL
+  end
+
+
+
+(1..front_node_count).each do |i|
+  config.vm.define "#{front_node_prefix}-#{i}" do |node|
+    node.vm.box = "#{vagrant_box_image}"
+    node.vm.box_check_update = true
+    node.vm.hostname = "#{front_node_prefix}-#{i}"
+    node.vm.provider "virtualbox" do |vb|
+      vb.name   = "#{front_node_prefix}-#{i}"
+      vb.cpus   = 1
+      vb.memory = "2048"
+    end
+    node.vm.network "private_network", ip: "#{cluster_cidr}.#{i+10}", 
+      nic_type: "82543GC"
+    node.vm.provision "shell", inline: <<-SHELL
+      chmod 664 /home/vagrant/.ssh/id_rsa.pub
+      cat /home/vagrant/.ssh/id_rsa.pub >> /home/vagrant/.ssh/authorized_keys
+      sudo systemctl restart ssh.service
+    SHELL
+  end
+end
+
+(1..db_node_count).each do |i|
+  config.vm.define "#{db_node_prefix}-#{i}" do |node|
+    node.vm.box = "#{vagrant_box_image}"
+    node.vm.box_check_update = true
+    node.vm.hostname = "#{db_node_prefix}-#{i}"
+    node.vm.provider "virtualbox" do |vb|
+      vb.name   = "#{db_node_prefix}-#{i}"
+      vb.cpus   = 1
+      vb.memory = "2048"
+    end
+    node.vm.network "private_network", ip: "#{cluster_cidr}.#{db_node_count+i+10}", 
+      nic_type: "82543GC"
+    node.vm.provision "shell", inline: <<-SHELL
+      chmod 664 /home/vagrant/.ssh/id_rsa.pub
+      cat /home/vagrant/.ssh/id_rsa.pub >> /home/vagrant/.ssh/authorized_keys
+      sudo systemctl restart ssh.service
+    SHELL
+    end
+  end
+end
